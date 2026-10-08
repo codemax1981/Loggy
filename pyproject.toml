@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "loggy"
+dynamic = ["version"]
+description = "A pilot's logbook for the terminal, for Windows, macOS and Linux"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["textual>=8.2,<9"]
+keywords = ["pilot", "logbook", "aviation", "tui", "textual"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+loggy = "loggy.__main__:main"
+
+[tool.setuptools]
+packages = ["loggy"]
+
+[tool.setuptools.dynamic]
+version = { attr = "loggy.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
