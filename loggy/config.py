@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from .stats import RULES
+from .stats import DEFAULT_RULES, RULES
 from .timeutil import HM, TIME_FORMATS
 
 
@@ -36,7 +36,7 @@ def documents_dir() -> Path:
 @dataclass
 class Settings:
     time_format: str = HM  # "hm" (1:30) or "decimal" (1.5)
-    rules: str = "easa"  # key into stats.RULES
+    rules: list[str] = field(default_factory=lambda: list(DEFAULT_RULES))  # keys of RULES
     theme: str = ""  # Textual theme name; blank for the default
 
     @classmethod
@@ -48,14 +48,17 @@ class Settings:
             return settings
         if not isinstance(data, dict):
             return settings
-        for field in fields(cls):
-            value = data.get(field.name)
-            if isinstance(value, str):
-                setattr(settings, field.name, value)
-        if settings.time_format not in TIME_FORMATS:
-            settings.time_format = HM
-        if settings.rules not in RULES:
-            settings.rules = "easa"
+        if data.get("time_format") in TIME_FORMATS:
+            settings.time_format = data["time_format"]
+        rules = data.get("rules")
+        if isinstance(rules, str):  # versions before 1.1 kept a single rule set
+            rules = [rules]
+        if isinstance(rules, list):
+            chosen = [key for key in RULES if key in rules]
+            if chosen:
+                settings.rules = chosen
+        if isinstance(data.get("theme"), str):
+            settings.theme = data["theme"]
         return settings
 
     def save(self, path: Path) -> None:

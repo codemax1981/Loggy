@@ -146,3 +146,9 @@ def add_months(day: dt.date, months: int) -> dt.date:
 
 def end_of_month(day: dt.date) -> dt.date:
     return add_months(day, 1) - dt.timedelta(days=1)
+
+
+def months_before(day: dt.date, months: int) -> dt.date:
+    """The same day of the month ``months`` earlier (the 31st becomes the month's last day)."""
+    first = add_months(day, -months)
+    return first.replace(day=min(day.day, end_of_month(first).day))

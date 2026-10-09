@@ -56,12 +56,13 @@ LAYOUT = (
         ("total", "Total time", "duration", 11),
     )),
     ("Time", (
-        ("se", "SP SE", "duration", 8),
-        ("me", "SP ME", "duration", 8),
+        ("se", "SP SE", "duration", 7),
+        ("me", "SP ME", "duration", 7),
         ("multi_pilot", "Multi-pilot", "duration", 12),
-        ("pic", "PIC", "duration", 8),
+        ("pic", "PIC", "duration", 7),
+        ("picus", "PICUS", "duration", 7),
         ("copilot", "Co-pilot", "duration", 9),
-        ("dual", "Dual", "duration", 8),
+        ("dual", "Dual", "duration", 7),
         ("instructor", "Instructor", "duration", 11),
     )),
     ("Conditions", (

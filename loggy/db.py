@@ -10,7 +10,11 @@ from typing import Iterable
 
 from .models import CLOCK_FIELDS, COUNT_FIELDS, DURATION_FIELDS, TEXT_FIELDS, Flight
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+# Statements that bring a logbook from the previous version up to each version.
+MIGRATIONS = {
+    2: ("ALTER TABLE flights ADD COLUMN picus INTEGER NOT NULL DEFAULT 0",),
+}
 
 COLUMNS = (
     ("date", "TEXT NOT NULL"),
@@ -61,6 +65,13 @@ class Logbook:
                     "CREATE INDEX IF NOT EXISTS flights_by_date ON flights (date, out_time)"
                 )
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            return
+        for target in range(version + 1, SCHEMA_VERSION + 1):
+            with self._conn:
+                self._conn.execute("BEGIN")  # each step commits completely or not at all
+                for statement in MIGRATIONS[target]:
+                    self._conn.execute(statement)
+                self._conn.execute(f"PRAGMA user_version = {target}")
 
     def close(self) -> None:
         self._conn.close()

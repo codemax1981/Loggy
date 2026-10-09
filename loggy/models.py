@@ -16,6 +16,7 @@ DURATION_FIELDS = (
     "me",
     "multi_pilot",
     "pic",
+    "picus",
     "copilot",
     "dual",
     "instructor",
@@ -49,6 +50,7 @@ LABELS = {
     "me": "Single-pilot ME",
     "multi_pilot": "Multi-pilot",
     "pic": "PIC",
+    "picus": "PICUS",
     "copilot": "Co-pilot",
     "dual": "Dual",
     "instructor": "Instructor",
@@ -82,6 +84,7 @@ class Flight:
     me: int = 0
     multi_pilot: int = 0
     pic: int = 0
+    picus: int = 0  # pilot-in-command under supervision (P1 U/S)
     copilot: int = 0
     dual: int = 0
     instructor: int = 0
@@ -116,6 +119,8 @@ class Flight:
             return "DUAL"
         if self.pic:
             return "PIC"
+        if self.picus:
+            return "PICUS"
         if self.copilot:
             return "SIC"
         return ""

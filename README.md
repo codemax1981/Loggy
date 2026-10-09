@@ -6,19 +6,20 @@ PowerShell or the classic command prompt), and on macOS and Linux too.
 ![The logbook](docs/logbook.png)
 
 - **Every logbook column**: date, aircraft type and registration, route, off- and
-  on-block times (UTC), single-pilot SE/ME and multi-pilot time, PIC, co-pilot, dual and
-  instructor time, night, IFR, actual and simulated instrument, cross-country, simulator
-  (FSTD), day and night landings, approaches and remarks. That covers both EASA/ICAO and FAA
-  style logbooks.
+  on-block times (UTC), single-pilot SE/ME and multi-pilot time, PIC, PICUS (P1 U/S),
+  co-pilot, dual and instructor time, night, IFR, actual and simulated instrument,
+  cross-country, simulator (FSTD), day and night landings, approaches and remarks. That covers
+  SACAA, DGCA, EASA/ICAO and FAA style logbooks.
 - **Quick entry**: the total is worked out from the block times, including flights past
   midnight. Type `=` in any time box to copy the total. A new flight starts from your last one
   (same aircraft and PIC, departing where you last landed). Airports, registrations, types and
   names are suggested as you type, and a known registration fills in its aircraft type.
-- **Totals**: grand totals, rolling 7/28/90/365-day and calendar-year totals for flight-time
-  limits, and totals by aircraft type and by year.
-- **Currency**: 90-day take-off and landing currency, day and night, for any aircraft and for
-  each type, under EASA/ICAO or FAA rules, plus FAA instrument currency (approaches). Shows when
-  each one runs out.
+- **Totals**: grand totals; day and night time by role, single- and multi-engine, the way
+  South African and Indian logbooks add it up; rolling 7/28/90-day, 6-month, 365-day and
+  calendar-year totals; and totals by aircraft type and by year.
+- **Currency** under SACAA and DGCA rules (or EASA/ICAO and FAA): take-off and landing
+  currency by day and night, for any aircraft and for each type, plus instrument approaches,
+  each with its regulation reference and the date it runs out.
 - **Your data stays yours**: a single file on your computer, backed up automatically each day.
   CSV import and export works with Excel and with most other logbook apps.
 - **Previous logbooks**: carry over the totals from a paper logbook as one brought-forward entry.
@@ -62,7 +63,7 @@ loggy
 | `/` | search; `Esc` clears it |
 | `1` `2` `3` | Logbook, Totals and Currency tabs |
 | `x` / `i` | export to / import from CSV |
-| `s` | settings: hours and minutes or decimal hours; EASA/ICAO or FAA currency rules |
+| `s` | settings: hours and minutes or decimal hours; which authorities' currency rules to check |
 | `?` | help |
 | `q` | quit |
 
@@ -86,10 +87,15 @@ The colour theme can be changed with `Ctrl+P` → *Theme*, and Loggy remembers y
 - `Enter` moves to the next box, `Ctrl+S` saves and `Esc` cancels (you are asked before
   anything you typed is thrown away).
 
+**Single-engine and multi-engine time.** Put single-engine time in **SP SE** and multi-engine
+time in **SP ME**, or in **Multi-pilot** when the aircraft is flown by a crew of two (airline
+flying). Loggy's day and night summary counts SP ME and Multi-pilot together as multi-engine
+time. **PICUS** is pilot in command under supervision (P1 U/S).
+
 Loggy checks each entry before saving it. For example, PIC or night time can't be more than
 the total, and both block times must be given or neither.
 
-In the logbook the **Role** column shows PIC, SIC (co-pilot), DUAL or INSTR. **SIM** marks a
+In the logbook the **Role** column shows PIC, PICUS, SIC (co-pilot), DUAL or INSTR. **SIM** marks a
 simulator session (its session time is shown as the total) and **B/F** marks
 brought-forward totals.
 
@@ -97,23 +103,36 @@ brought-forward totals.
 
 Add one entry dated the day of your last paper entry, put your totals in it (total, PIC,
 night, landings and so on), and tick **Brought forward**. It counts towards your grand totals
-and totals by type, but not towards currency or the recent-period totals.
+and totals by type, but not towards currency, the recent-period totals or the day and night
+summary by role (a paper total has no day and night split by role).
 
 ### Currency
 
-The Currency tab shows, for any aircraft and for each type you have flown:
+![Currency](docs/currency.png)
 
-- **Day**: 3 take-offs and landings in the last 90 days (EASA FCL.060 / FAA 61.57(a)).
-  Night landings count too.
-- **Night**: EASA needs 1 take-off and landing at night in the last 90 days if you have no
-  instrument rating; FAA 61.57(b) needs 3 to a full stop.
-- **Instrument** (FAA rules only): 6 approaches in the last 6 calendar months. Loggy counts
-  approaches; holding, intercepting and tracking are up to you to check.
+Choose the authorities whose rules you fly under in Settings (`s`): **SACAA (South Africa)**
+and **DGCA (India)** are ticked to start with, and EASA/ICAO and FAA are there too. Each
+requirement is shown once, with every regulation that asks for it, for any aircraft and for
+each type you have flown:
+
+| Requirement | SACAA | DGCA | EASA / ICAO | FAA |
+| --- | --- | --- | --- | --- |
+| 3 take-offs and landings in 90 days, by day or night | CAR 91.02.4(1) | CAR Section 8 Series F Part I (on type, or an approved simulator) | FCL.060(b)(1) | 61.57(a) |
+| Take-offs and landings at night in 90 days | 3, CAR 91.02.4(2) | | 1 without an instrument rating, FCL.060(b)(2) | 3 to a full stop, 61.57(b) |
+| Instrument approaches | 2 in 90 days, CAR 91.02.4(4) | | | 6 in 6 calendar months, 61.57(c) |
 
 Each line shows the date it runs out. **CURRENT** turns amber when that is within 14 days.
 
-Loggy counts take-offs as equal to landings, as paper logbooks do. Loggy is a record-keeping
-aid; check your currency against your regulator's rules for your licence and aircraft.
+Some things to know:
+
+- The DGCA 90-day rule is written for multi-pilot aeroplanes and those of 5,700 kg and more;
+  check DGCA Operations Circular 1 of 2024 for lighter single-pilot aeroplanes. Loggy does not
+  check a DGCA night or instrument recency rule, because none could be confirmed from the
+  published regulations.
+- Loggy counts take-offs as equal to landings, as paper logbooks do, and counts approaches and
+  landings flown in a simulator, which SACAA and DGCA allow.
+- Loggy is a record-keeping aid, not legal advice. Regulations change, so check the current
+  rules for your licence and aircraft.
 
 ## Your data
 
@@ -138,7 +157,8 @@ logbook are skipped, so importing the same file twice is harmless. Loggy reads i
 and most spreadsheets and logbook-app exports:
 
 - Column names are matched loosely: `From`, `Dep` or `Departure`; `Reg`, `Tail` or `Ident`;
-  `Total`, `Block time` or `Total time`; `PIC`, `SIC`, `Night`, `IFR`, `Landings` and so on.
+  `Total`, `Block time` or `Total time`; `PIC`, `P1 U/S`, `SIC`, `Night`, `IFR`, `Landings`
+  and so on.
   Columns it doesn't know are listed and ignored.
 - Commas, semicolons or tabs; dates as `2026-10-07`, `07/10/2026` or `10/07/2026` (whether the
   day comes first is worked out from the whole file), or `07-Oct-2026`.

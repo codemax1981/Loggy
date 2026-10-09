@@ -16,17 +16,20 @@ from rich.text import Text
 from .models import Flight
 from .stats import (
     ANY_AIRCRAFT,
+    ROLES,
+    RULES,
     Currency,
-    Rules,
+    RequirementStatus,
     Totals,
-    approach_currency,
-    currency_by_type,
+    currency_status,
+    experience,
     last_flight,
     period_totals,
     totals_by_type,
     totals_by_year,
+    window_start,
 )
-from .timeutil import add_months, format_duration
+from .timeutil import format_duration
 
 WARN_DAYS = 14  # flag currency that runs out within this many days
 
@@ -88,6 +91,7 @@ def _ago(day: dt.date, today: dt.date) -> str:
 
 _BREAKDOWN_COLUMNS = (
     ("pic", "PIC"),
+    ("picus", "PICUS"),
     ("copilot", "Co-pilot"),
     ("dual", "Dual"),
     ("instructor", "Instr."),
@@ -100,7 +104,7 @@ _BREAKDOWN_COLUMNS = (
 )
 
 
-_TYPE_COLUMNS = ("pic", "copilot", "dual", "instructor", "night", "ifr", "sim")
+_TYPE_COLUMNS = ("pic", "picus", "copilot", "dual", "instructor", "night", "ifr", "sim")
 
 
 def _breakdown(
@@ -140,8 +144,8 @@ def _grand_totals(totals: Totals, fmt: str) -> Table:
     groups = (
         (("Total time", "total"), ("Single-pilot SE", "se"), ("Single-pilot ME", "me"),
          ("Multi-pilot", "multi_pilot"), ("Simulator", "sim")),
-        (("PIC", "pic"), ("Co-pilot", "copilot"), ("Dual received", "dual"),
-         ("Instructor", "instructor")),
+        (("PIC", "pic"), ("PICUS", "picus"), ("Co-pilot", "copilot"),
+         ("Dual received", "dual"), ("Instructor", "instructor")),
         (("Night", "night"), ("IFR", "ifr"), ("Actual instrument", "actual_inst"),
          ("Simulated instrument", "sim_inst"), ("Cross-country", "xc")),
     )
@@ -163,6 +167,52 @@ def _grand_totals(totals: Totals, fmt: str) -> Table:
                 cells += ["", "", ""]
         table.add_row(*cells)
     return table
+
+
+def _by_role(entries: Sequence[Flight], fmt: str) -> RenderableType:
+    """Day and night time by role, single- and multi-engine, as SA and Indian logbooks add up."""
+    summary = experience(entries)
+    engines = summary.has_engines()
+    table = Table(box=box.SIMPLE_HEAD, pad_edge=False, show_edge=False, header_style="bold")
+    table.add_column("Role", no_wrap=True)
+    headers = (("SE day", "SE night", "ME day", "ME night") if engines else ()) + (
+        "Day", "Night", "Total")
+    for header in headers:
+        table.add_column(header, justify="right", no_wrap=True)
+
+    def cells(role: str) -> list[str]:
+        values = []
+        if engines:
+            for engine in ("se", "me"):
+                values += [summary[(role, engine, "day")], summary[(role, engine, "night")]]
+        day, night = summary[(role, "all", "day")], summary[(role, "all", "night")]
+        values += [day, night, day + night]
+        return [format_duration(value, fmt, blank_zero=True) for value in values]
+
+    for role, label in ROLES:
+        if summary[(role, "all", "day")] or summary[(role, "all", "night")]:
+            table.add_row(label, *cells(role))
+    table.add_row(*(Text(cell, style="bold") for cell in ["Flight time", *cells("total")]))
+
+    notes = []
+    if summary.xc_pic:
+        notes.append(f"Cross-country as PIC: {format_duration(summary.xc_pic, fmt)}.")
+    if not engines:
+        notes.append("Fill in SP SE, SP ME or Multi-pilot on your flights to split this into "
+                     "single- and multi-engine time.")
+    elif summary.unclassified:
+        notes.append(f"{format_duration(summary.unclassified, fmt)} of flight time is not marked "
+                     "SP SE, SP ME or Multi-pilot, so it is only in the Day, Night and Total "
+                     "columns.")
+    if summary.brought_forward:
+        notes.append("Brought-forward totals are left out: they have no day and night split by "
+                     "role.")
+    if summary.sim_sessions:
+        notes.append("Simulator sessions are left out: they are not flight time.")
+    parts: list[RenderableType] = [table]
+    if notes:
+        parts.append(Padding(Text("\n".join(notes), style="dim"), (1, 0, 0, 0)))
+    return Group(*parts)
 
 
 def totals_report(entries: Sequence[Flight], today: dt.date, fmt: str, palette: Palette
@@ -188,6 +238,8 @@ def totals_report(entries: Sequence[Flight], today: dt.date, fmt: str, palette: 
         _heading("Grand totals", palette, note),
         Padding(_grand_totals(grand, fmt), (1, 0, 0, 2)),
         Padding(Text(" · ".join(counts), style="dim"), (1, 0, 1, 2)),
+        _heading("Day and night by role", palette, "SE = SP SE; ME = SP ME + multi-pilot"),
+        Padding(_by_role(entries, fmt), (1, 0, 1, 2)),
         _heading("Recent", palette, "rolling periods for flight-time limits"),
         Padding(_breakdown("Period", [(label, t, "") for label, t in periods], fmt), (1, 0, 1, 2)),
         _heading("By aircraft type", palette),
@@ -228,65 +280,68 @@ def _until(currency: Currency) -> Text:
     return Text("never met", style="dim")
 
 
-def currency_report(entries: Sequence[Flight], today: dt.date, rules: Rules, palette: Palette
-                    ) -> RenderableType:
-    rows = currency_by_type(entries, today, rules)
-    if not rows:
-        return Text("No flights logged yet. Your currency will appear here.", style="dim")
+_COUNT_HEADERS = {"landings": "Landings", "night_landings": "Night ldg", "approaches": "Approaches"}
+
+
+def _requirement(status: RequirementStatus, today: dt.date, palette: Palette) -> RenderableType:
+    """One requirement: what it asks for, who asks for it, and how each aircraft stands."""
+    requirement = status.requirement
+    sources = Text()
+    for index, (authority, reference) in enumerate(status.sources):
+        if index:
+            sources.append("\n")
+        sources.append(f"{authority}: ", style="bold")
+        sources.append(reference)
+    description = Group(
+        Text.assemble((f"{requirement.title}  ", f"bold {palette.accent}"), requirement.text),
+        Padding(sources, (0, 0, 0, 2), style="dim"),
+    )
+    if not requirement.per_type:
+        [row] = status.rows
+        since = window_start(requirement, today)
+        line = Text.assemble(
+            f"{_COUNT_HEADERS[requirement.measure]} since {since}: ",
+            (str(row.currency.count), "bold"), "   ", _status(row.currency, palette), "   ",
+            _until(row.currency),
+        )
+        return Group(description, Padding(line, (1, 0, 0, 2)))
 
     table = Table(box=box.SIMPLE_HEAD, pad_edge=False, show_edge=False, header_style="bold")
     table.add_column("Aircraft", no_wrap=True)
     table.add_column("Last flown", no_wrap=True)
-    table.add_column("Day", no_wrap=True, min_width=7)
-    table.add_column("Ldg", justify="right", no_wrap=True)
+    table.add_column("Status", no_wrap=True, min_width=7)
+    table.add_column(_COUNT_HEADERS[requirement.measure], justify="right", no_wrap=True)
     table.add_column("Valid until", no_wrap=True, min_width=17)
-    table.add_column("Night", no_wrap=True, min_width=7)
-    table.add_column("Ldg", justify="right", no_wrap=True)
-    table.add_column("Valid until", no_wrap=True, min_width=17)
-    for row in rows:
+    for row in status.rows:
         name = Text(row.aircraft_type, style="bold" if row.aircraft_type == ANY_AIRCRAFT else "")
         table.add_row(
             name,
             row.last_date.isoformat() if row.last_date else "",
-            _status(row.day, palette),
-            str(row.day.count),
-            _until(row.day),
-            _status(row.night, palette),
-            str(row.night.count),
-            _until(row.night),
+            _status(row.currency, palette),
+            str(row.currency.count),
+            _until(row.currency),
         )
+    return Group(description, Padding(table, (1, 0, 0, 2)))
 
+
+def currency_report(entries: Sequence[Flight], today: dt.date, rule_keys: Sequence[str],
+                    palette: Palette) -> RenderableType:
+    statuses = currency_status(entries, today, rule_keys)
+    if not statuses:
+        return Text("No flights logged yet. Your currency will appear here.", style="dim")
+
+    authorities = " and ".join(RULES[key].name for key in rule_keys)
     parts: list[RenderableType] = [
-        _heading("Take-off and landing currency", palette,
-                 f"{rules.name} rules, as of {today} UTC"),
-        Padding(
-            Text.assemble(("Day    ", "bold"), rules.day_rule, "\n",
-                          ("Night  ", "bold"), rules.night_rule, "\n",
-                          ("Ldg    ", "bold"), "landings in the last 90 days", style="dim"),
-            (1, 0, 0, 2),
-        ),
-        Padding(table, (1, 0, 1, 2)),
+        _heading("Currency", palette, f"{authorities}, as of {today} UTC"),
+        Text(""),
     ]
-
-    if rules.instrument:
-        approaches = approach_currency(entries, today)
-        since = add_months(today, -6)
-        parts += [
-            _heading("Instrument currency", palette, "14 CFR 61.57(c)"),
-            Padding(
-                Group(
-                    Text("6 approaches, holding, and intercepting and tracking courses in the "
-                         "last 6 calendar months", style="dim"),
-                    Text(""),
-                    Text.assemble(f"Approaches since {since}: ", (str(approaches.count), "bold"),
-                                  "   ", _status(approaches, palette), "   ",
-                                  _until(approaches)),
-                    Text("Loggy counts approaches only - holds and tracking are up to you.",
-                         style="dim"),
-                ),
-                (1, 0, 1, 2),
-            ),
-        ]
+    for status in statuses:
+        parts += [Padding(_requirement(status, today, palette), (0, 0, 1, 2))]
+    parts.append(Padding(
+        Text("Take-offs are counted as equal to landings. Loggy is a record-keeping aid: check "
+             "the current regulations for your licence and aircraft.", style="dim"),
+        (0, 0, 1, 2),
+    ))
 
     last = last_flight(entries)
     if last:

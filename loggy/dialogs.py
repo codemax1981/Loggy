@@ -12,7 +12,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
 from .config import Settings
 from .csvio import ImportResult
@@ -239,6 +239,7 @@ class SettingsDialog(ModalScreen[Optional[Settings]]):
     SettingsDialog .dialog { width: 80; }
     SettingsDialog Label { margin-top: 1; text-style: bold; }
     SettingsDialog Select { width: 40; }
+    SettingsDialog Checkbox { background: transparent; }
     SettingsDialog #files { margin-top: 1; }
     """
     BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
@@ -258,13 +259,11 @@ class SettingsDialog(ModalScreen[Optional[Settings]]):
                 allow_blank=False,
                 id="time-format",
             )
-            yield Label("Currency rules")
-            yield Select(
-                [(rules.name, key) for key, rules in RULES.items()],
-                value=self._settings.rules,
-                allow_blank=False,
-                id="rules",
-            )
+            yield Label("Check currency for")
+            for key, rules in RULES.items():
+                yield Checkbox(rules.name, value=key in self._settings.rules, id=f"rules-{key}",
+                               compact=True)
+            yield Static("", id="problem", classes="error")
             files = Text()
             for label, path in self._files:
                 files.append(f"{label}: ", style="bold")
@@ -280,10 +279,14 @@ class SettingsDialog(ModalScreen[Optional[Settings]]):
         if event.button.id != "save":
             self.dismiss(None)
             return
+        rules = [key for key in RULES if self.query_one(f"#rules-{key}", Checkbox).value]
+        if not rules:
+            self.query_one("#problem", Static).update("Choose at least one authority")
+            return
         self.dismiss(
             Settings(
                 time_format=str(self.query_one("#time-format", Select).value),
-                rules=str(self.query_one("#rules", Select).value),
+                rules=rules,
                 theme=self._settings.theme,
             )
         )
@@ -298,7 +301,8 @@ HELP_TEXT = """\
   /         search             Esc  clear the search
   1, 2, 3   Logbook, Totals and Currency tabs
   x, i      export to or import from a CSV file
-  s         settings           q    quit
+  s         settings: time format and which rules to check
+  q         quit
 
 [b]Entering a flight[/b]
   All times are UTC. Type clock times as 0930, 930 or 09:30.
@@ -312,6 +316,8 @@ HELP_TEXT = """\
   Dates: t = today, y = yesterday, -3 = three days ago.
   → accepts a suggested airport, registration, type or name.
   Enter moves to the next box. Ctrl+S saves, Esc cancels.
+  SP SE / SP ME: single- or multi-engine time; Multi-pilot: flown
+  by a crew of two. PICUS: pilot in command under supervision.
 
 [b]Previous logbooks[/b]
   To carry over totals from a paper logbook, add one entry with

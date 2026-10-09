@@ -8,6 +8,7 @@ from loggy.timeutil import (
     block_minutes,
     end_of_month,
     format_duration,
+    months_before,
     parse_clock,
     parse_count,
     parse_date,
@@ -124,3 +125,10 @@ def test_month_arithmetic():
     assert add_months(dt.date(2026, 11, 2), 3) == dt.date(2027, 2, 1)
     assert end_of_month(dt.date(2028, 2, 10)) == dt.date(2028, 2, 29)
     assert end_of_month(dt.date(2026, 12, 1)) == dt.date(2026, 12, 31)
+
+
+def test_months_before():
+    assert months_before(dt.date(2026, 10, 9), 6) == dt.date(2026, 4, 9)
+    assert months_before(dt.date(2026, 8, 31), 6) == dt.date(2026, 2, 28)
+    assert months_before(dt.date(2028, 8, 31), 6) == dt.date(2028, 2, 29)
+    assert months_before(dt.date(2026, 1, 15), 1) == dt.date(2025, 12, 15)

@@ -306,17 +306,26 @@ def test_export_import_and_settings(logbook, tmp_path):
         await pilot.pause()
         assert isinstance(pilot.app.screen, SettingsDialog)
         pilot.app.screen.query_one("#time-format").value = "decimal"
+        for key in ("sacaa", "dgca"):  # the defaults: untick both
+            pilot.app.screen.query_one(f"#rules-{key}").value = False
+        await pilot.click("#save")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SettingsDialog)  # at least one is needed
+        assert "at least one" in plain(pilot.app.screen.query_one("#problem", Static))
+        pilot.app.screen.query_one("#rules-faa").value = True
+        await pilot.pause(0.3)  # a button ignores clicks during its 0.2 s press animation
         await pilot.click("#save")
         await pilot.pause()
         table = pilot.app.query_one("#flights", LogTable)
         assert table.cell(1, 7) == "1.5"
 
     run(make_app(logbook, tmp_path), test)
-    assert Settings.load(tmp_path / "settings.json").time_format == "decimal"
+    saved = Settings.load(tmp_path / "settings.json")
+    assert (saved.time_format, saved.rules) == ("decimal", ["faa"])
 
 
-@pytest.mark.parametrize("rules", ["easa", "faa"])
-def test_reports_render_for_both_rule_sets(logbook, tmp_path, rules):
+@pytest.mark.parametrize("rules", [["sacaa", "dgca"], ["easa"], ["faa"], ["dgca"]])
+def test_reports_render_for_each_authority(logbook, tmp_path, rules):
     logbook.add_many([
         Flight(date=dt.date(2026, 9, 1), aircraft_type="C172", total=90, pic=90, ldg_day=3,
                approaches=2),
@@ -335,7 +344,9 @@ def test_reports_render_for_both_rule_sets(logbook, tmp_path, rules):
         currency = plain(pilot.app.query_one("#currency-report", Static))
         assert "Grand totals" in totals and "101:30" in totals
         assert "CURRENT" in currency
-        assert ("Instrument currency" in currency) == (rules == "faa")
+        assert ("Instrument" in currency) == ("faa" in rules or "sacaa" in rules)
+        assert ("91.02.4(2)" in currency) == ("sacaa" in rules)
+        assert ("Section 8 Series F Part I" in currency) == ("dgca" in rules)
 
     run(make_app(logbook, tmp_path, rules=rules), test)
 

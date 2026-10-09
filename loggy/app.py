@@ -36,7 +36,7 @@ from .form import (
 )
 from .models import Flight
 from .reports import Palette, currency_report, totals_report
-from .stats import RULES, Totals, last_flight, period_totals
+from .stats import Totals, last_flight, period_totals
 from .table import PADDING, Column, LogTable, column_widths
 from .timeutil import format_duration, utc_today
 
@@ -327,7 +327,7 @@ class LoggyApp(App[None]):
             totals_report(self.entries, today, self.fmt, palette)
         )
         self.query_one("#currency-report", Static).update(
-            currency_report(self.entries, today, RULES[self.settings.rules], palette)
+            currency_report(self.entries, today, self.settings.rules, palette)
         )
 
     def _refresh_status(self) -> None:
