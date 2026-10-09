@@ -28,6 +28,11 @@ PADDING = 1  # spaces either side of every cell
 class Column:
     label: str
     right: bool = False  # right-align, for numbers
+    group: str = ""  # a heading shared with the neighbouring columns of the same group
+    short: str = ""  # the heading when the column is too narrow for ``label``
+
+    def heading(self, width: int) -> str:
+        return self.label if cell_len(self.label) <= width or not self.short else self.short
 
 
 def fit(text: str, width: int, right: bool = False) -> str:
@@ -39,15 +44,41 @@ def fit(text: str, width: int, right: bool = False) -> str:
     return padding + text if right else text + padding
 
 
+def groups(columns: Sequence[Column]) -> list[tuple[int, int]]:
+    """The ``(start, end)`` index range of each run of columns that share a group."""
+    runs = []
+    start = 0
+    while start < len(columns):
+        end = start + 1
+        group = columns[start].group
+        while group and end < len(columns) and columns[end].group == group:
+            end += 1
+        if group:
+            runs.append((start, end))
+        start = end
+    return runs
+
+
 def column_widths(columns: Sequence[Column], rows: Sequence[Sequence[str]]) -> list[int]:
-    widths = [cell_len(column.label) for column in columns]
+    """Each column's width: its widest cell or heading, and wide enough for its group's
+    heading. A column with a short heading is only as wide as that and its cells."""
+    widths = [cell_len(column.short or column.label) for column in columns]
     for index, values in enumerate(zip(*rows)):
         widths[index] = max(widths[index], max(map(cell_len, values)))
+    for start, end in groups(columns):
+        span = sum(widths[start:end]) + 2 * PADDING * (end - start)
+        short = cell_len(columns[start].group) + 2 - span  # room for " heading "
+        for step in range(max(short, 0)):
+            widths[start + step % (end - start)] += 1
     return widths
 
 
 class LogTable(ScrollView, can_focus=True):
-    """Rows of plain-text cells with a row cursor and a fixed header."""
+    """Rows of plain-text cells with a row cursor and a fixed header.
+
+    A table wider than the screen scrolls sideways a column at a time, and its first
+    ``fixed`` columns stay in view while it does, as frozen panes do in a spreadsheet.
+    """
 
     COMPONENT_CLASSES = {
         "log-table--header",
@@ -100,6 +131,8 @@ class LogTable(ScrollView, can_focus=True):
         Binding("pagedown", "page(1)", "Page down", show=False),
         Binding("home", "first", "First", show=False),
         Binding("end", "last", "Last", show=False),
+        Binding("left", "column(-1)", "Scroll left", show=False),
+        Binding("right", "column(1)", "Scroll right", show=False),
         Binding("enter", "select", "Select", show=False),
     ]
 
@@ -127,10 +160,13 @@ class LogTable(ScrollView, can_focus=True):
         def control(self) -> LogTable:
             return self.table
 
-    def __init__(self, columns: Sequence[Column], *, id: str | None = None) -> None:
+    def __init__(self, columns: Sequence[Column], *, fixed: int = 0,
+                 id: str | None = None) -> None:
         super().__init__(id=id)
         self.columns = tuple(columns)
+        self.fixed = fixed
         self._rows: list[Sequence[str]] = []
+        self._header_lines = 1
         self._muted: list[bool] = []
         self.widths = [cell_len(column.label) for column in self.columns]
         self._cursor = 0
@@ -155,13 +191,17 @@ class LogTable(ScrollView, can_focus=True):
         *,
         muted: Sequence[bool] = (),
         cursor: int = 0,
+        columns: Sequence[Column] | None = None,
     ) -> None:
         """Replace every row; ``widths`` gives each column's width in cells."""
+        if columns is not None:
+            self.columns = tuple(columns)
+        self._header_lines = 2 if any(column.group for column in self.columns) else 1
         self._rows = list(rows)
         self._muted = list(muted) or [False] * len(self._rows)
         self.widths = list(widths)
         line_width = sum(width + 2 * PADDING for width in self.widths)
-        self.virtual_size = Size(line_width, len(self._rows) + 1)
+        self.virtual_size = Size(line_width, len(self._rows) + self._header_lines)
         self.move_cursor(cursor)
         self.refresh()
 
@@ -170,7 +210,7 @@ class LogTable(ScrollView, can_focus=True):
     def move_cursor(self, row: int) -> None:
         row = max(0, min(row, len(self._rows) - 1))
         self._cursor = row
-        visible = max(1, self.scrollable_content_region.height - 1)  # rows below the header
+        visible = max(1, self.scrollable_content_region.height - self._header_lines)
         top = round(self.scroll_target_y)
         if row < top:
             self.scroll_to(y=row, animate=False)
@@ -184,7 +224,7 @@ class LogTable(ScrollView, can_focus=True):
         self.move_cursor(self._cursor + delta)
 
     def action_page(self, direction: int) -> None:
-        page = max(1, self.scrollable_content_region.height - 2)
+        page = max(1, self.scrollable_content_region.height - self._header_lines - 1)
         self.move_cursor(self._cursor + direction * page)
 
     def action_first(self) -> None:
@@ -193,14 +233,29 @@ class LogTable(ScrollView, can_focus=True):
     def action_last(self) -> None:
         self.move_cursor(len(self._rows) - 1)
 
+    def _fixed_width(self) -> int:
+        return sum(width + 2 * PADDING for width in self.widths[:self.fixed])
+
+    def action_column(self, direction: int) -> None:
+        """Scroll sideways to bring the next (or previous) column to the left edge."""
+        starts = [0]
+        for width in self.widths[self.fixed:]:
+            starts.append(starts[-1] + width + 2 * PADDING)
+        x = round(self.scroll_target_x)
+        if direction > 0:
+            target = next((start for start in starts if start > x), x)
+        else:
+            target = max((start for start in starts if start < x), default=0)
+        self.scroll_to(x=target, animate=False)
+
     def action_select(self) -> None:
         if self._rows:
             self.post_message(self.Selected(self, self._cursor))
 
     def on_click(self, event: events.Click) -> None:
-        if event.y < 1:  # the header
+        if event.y < self._header_lines:
             return
-        row = int(self.scroll_offset.y) + event.y - 1
+        row = int(self.scroll_offset.y) + event.y - self._header_lines
         if 0 <= row < len(self._rows):
             if row == self._cursor:
                 self.post_message(self.Selected(self, row))
@@ -216,21 +271,45 @@ class LogTable(ScrollView, can_focus=True):
             for cell, width, column in zip(cells, self.widths, self.columns)
         )
 
+    def _group_line(self) -> str:
+        """Group headings, each centred over its columns, between rules if there is room."""
+        parts = []
+        index = 0
+        for start, end in groups(self.columns):
+            parts.append(" " * sum(width + 2 * PADDING for width in self.widths[index:start]))
+            inner = sum(width + 2 * PADDING for width in self.widths[start:end]) - 2
+            group = self.columns[start].group
+            label = f" {group} " if cell_len(group) + 2 <= inner else fit(group, inner)
+            fill = inner - cell_len(label)
+            rule = "─" if fill >= 2 else " "
+            parts.append(" " + rule * (fill // 2) + label + rule * (fill - fill // 2) + " ")
+            index = end
+        parts.append(" " * sum(width + 2 * PADDING for width in self.widths[index:]))
+        return "".join(parts)
+
     def render_line(self, y: int) -> Strip:
         scroll_x, scroll_y = self.scroll_offset
         width = self.scrollable_content_region.width
-        if y == 0:
+        if y < self._header_lines:
             style = self.get_component_rich_style("log-table--header")
-            text = self._line([column.label for column in self.columns])
+            if y < self._header_lines - 1:
+                text = self._group_line()
+            else:
+                text = self._line([column.heading(width)
+                                   for column, width in zip(self.columns, self.widths)])
         else:
-            index = scroll_y + y - 1
+            index = scroll_y + y - self._header_lines
             if index >= len(self._rows):
                 return Strip.blank(width, self.rich_style)
             style = self._row_style(index)
             text = self._line(self._rows[index])
-        return Strip([Segment(text, style)], cell_len(text)).crop_extend(
-            scroll_x, scroll_x + width, style
-        )
+        strip = Strip([Segment(text, style)], cell_len(text))
+        fixed = self._fixed_width()
+        if scroll_x and 0 < fixed < width:  # keep the fixed columns, scroll the others
+            start = fixed + scroll_x
+            strip = Strip.join([strip.crop(0, fixed), strip.crop(start, start + width - fixed)])
+            return strip.crop_extend(0, width, style)
+        return strip.crop_extend(scroll_x, scroll_x + width, style)
 
     def _row_style(self, index: int) -> Style:
         if index == self._cursor:

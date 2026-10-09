@@ -8,12 +8,36 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
-from .models import CLOCK_FIELDS, COUNT_FIELDS, DURATION_FIELDS, TEXT_FIELDS, Flight
+from .models import (
+    CLOCK_FIELDS,
+    COUNT_FIELDS,
+    DURATION_FIELDS,
+    TEXT_FIELDS,
+    Endorsement,
+    Flight,
+)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+ENDORSEMENTS_TABLE = """CREATE TABLE IF NOT EXISTS endorsements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    instructor TEXT NOT NULL DEFAULT '',
+    licence TEXT NOT NULL DEFAULT '',
+    designation TEXT NOT NULL DEFAULT '',
+    ato TEXT NOT NULL DEFAULT '',
+    ato_number TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)"""
 # Statements that bring a logbook from the previous version up to each version.
 MIGRATIONS = {
     2: ("ALTER TABLE flights ADD COLUMN picus INTEGER NOT NULL DEFAULT 0",),
+    3: (
+        "ALTER TABLE flights ADD COLUMN navaids TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE flights ADD COLUMN place TEXT NOT NULL DEFAULT ''",
+        ENDORSEMENTS_TABLE,
+    ),
 }
 
 COLUMNS = (
@@ -28,6 +52,9 @@ FIELD_ORDER = tuple(field.name for field in dataclasses.fields(Flight))
 _SELECT = f"SELECT {', '.join(FIELD_ORDER)} FROM flights"
 _DATE = FIELD_ORDER.index("date")
 _CARRIED_FORWARD = FIELD_ORDER.index("carried_forward")
+ENDORSEMENT_FIELDS = tuple(
+    field.name for field in dataclasses.fields(Endorsement) if field.name != "id"
+)
 
 
 class LogbookError(Exception):
@@ -64,6 +91,7 @@ class Logbook:
                 self._conn.execute(
                     "CREATE INDEX IF NOT EXISTS flights_by_date ON flights (date, out_time)"
                 )
+                self._conn.execute(ENDORSEMENTS_TABLE)
                 self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             return
         for target in range(version + 1, SCHEMA_VERSION + 1):
@@ -150,6 +178,48 @@ class Logbook:
         with self._conn:
             self._conn.execute("DELETE FROM flights WHERE id = ?", (flight_id,))
 
+    # -- endorsements --------------------------------------------------------------
+
+    def endorsements(self) -> list[Endorsement]:
+        """All endorsements in date order."""
+        rows = self._conn.execute(
+            f"SELECT {', '.join(ENDORSEMENT_FIELDS)}, id FROM endorsements ORDER BY date, id"
+        )
+        return [Endorsement(dt.date.fromisoformat(row[0]), *row[1:]) for row in rows]
+
+    @staticmethod
+    def _endorsement_values(endorsement: Endorsement) -> list:
+        return [endorsement.date.isoformat(),
+                *(getattr(endorsement, name) for name in ENDORSEMENT_FIELDS[1:])]
+
+    def add_endorsement(self, endorsement: Endorsement) -> int:
+        now = self._now()
+        placeholders = ", ".join("?" for _ in range(len(ENDORSEMENT_FIELDS) + 2))
+        with self._conn:
+            cursor = self._conn.execute(
+                f"INSERT INTO endorsements ({', '.join(ENDORSEMENT_FIELDS)}, created_at, "
+                f"updated_at) VALUES ({placeholders})",
+                [*self._endorsement_values(endorsement), now, now],
+            )
+        endorsement.id = cursor.lastrowid
+        return cursor.lastrowid
+
+    def update_endorsement(self, endorsement: Endorsement) -> None:
+        if endorsement.id is None:
+            raise ValueError("Cannot update an endorsement that has not been saved")
+        assignments = ", ".join(f"{name} = ?" for name in ENDORSEMENT_FIELDS)
+        with self._conn:
+            cursor = self._conn.execute(
+                f"UPDATE endorsements SET {assignments}, updated_at = ? WHERE id = ?",
+                [*self._endorsement_values(endorsement), self._now(), endorsement.id],
+            )
+        if cursor.rowcount == 0:
+            raise LogbookError(f"Endorsement {endorsement.id} no longer exists")
+
+    def delete_endorsement(self, endorsement_id: int) -> None:
+        with self._conn:
+            self._conn.execute("DELETE FROM endorsements WHERE id = ?", (endorsement_id,))
+
     # -- maintenance ---------------------------------------------------------------
 
     def backup_to(self, destination: Path) -> None:
@@ -168,7 +238,7 @@ def daily_backup(logbook: Logbook, backup_dir: Path, today: dt.date, keep: int =
     Returns the path of the backup written today, or ``None`` if there was
     nothing to do (the logbook is empty or today's backup already exists).
     """
-    if logbook.count() == 0:
+    if logbook.count() == 0 and not logbook.endorsements():
         return None
     target = backup_dir / f"logbook-{today.isoformat()}.db"
     written = None

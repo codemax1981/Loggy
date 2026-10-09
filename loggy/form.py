@@ -92,6 +92,7 @@ class FormContext:
     registrations: list[str] = field(default_factory=list)
     names: list[str] = field(default_factory=list)
     type_for_registration: dict[str, str] = field(default_factory=dict)
+    multi_pilot_types: set[str] = field(default_factory=set)  # types flown with a crew of two
 
     @classmethod
     def from_entries(cls, entries: Sequence[Flight]) -> FormContext:
@@ -109,6 +110,8 @@ class FormContext:
         for entry in newest:
             if entry.registration and entry.aircraft_type:
                 context.type_for_registration.setdefault(entry.registration, entry.aircraft_type)
+            if entry.multi_pilot and entry.aircraft_type:
+                context.multi_pilot_types.add(entry.aircraft_type.upper())
         return context
 
 
@@ -225,6 +228,10 @@ class FlightForm(ModalScreen[Optional[Flight]]):
     following it when the total changes.
     """
 
+    LAYOUT = LAYOUT
+    FIELDS = FIELD_NAMES
+    HELP = HELP  # the line under the form when there is nothing wrong
+
     DEFAULT_CSS = """
     FlightForm {
         align: center middle;
@@ -316,7 +323,7 @@ class FlightForm(ModalScreen[Optional[Flight]]):
     ) -> None:
         super().__init__()
         self._title = title
-        self._values = {**dict.fromkeys(FIELD_NAMES, ""), **values}
+        self._values = {**dict.fromkeys(self.FIELDS, ""), **values}
         self._follow = set(follow)
         self._flight_id = flight_id
         self._carried_forward = carried_forward
@@ -325,6 +332,7 @@ class FlightForm(ModalScreen[Optional[Flight]]):
         self._today = today
         self._on_save = on_save
         self._inputs: dict[str, Input] = {}
+        self._kinds: dict[str, str] = {}
         self._type_touched = False
         self._initial: dict[str, object] = {}
         self._message_field: str | None = None
@@ -363,37 +371,50 @@ class FlightForm(ModalScreen[Optional[Flight]]):
             **options,
         )
         self._inputs[name] = widget
+        self._kinds[name] = kind
         return widget
+
+    def _label(self, name: str) -> str:
+        return LABELS.get(name, name)
+
+    def _field(self, name: str, label: str, kind: str, width: int,
+               classes: str = "field") -> ComposeResult:
+        with Vertical(classes=classes) as box:
+            box.styles.width = width
+            yield Label(label)
+            yield self._make_input(name, kind)
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="form", can_focus=False) as form:
             form.border_title = self._title
             form.border_subtitle = "Ctrl+S save · Esc cancel"
-            for section, fields in LAYOUT:
+            for section, fields in self.LAYOUT:
                 with Horizontal(classes="row"):
                     yield Label(section, classes="section")
                     for name, label, kind, width in fields:
-                        with Vertical(classes="field gap" if name == "pic" else "field") as box:
-                            box.styles.width = width
-                            yield Label(label)
-                            yield self._make_input(name, kind)
+                        yield from self._field(name, label, kind, width,
+                                               "field gap" if name == "pic" else "field")
             with Horizontal(classes="row"):
                 yield Label("Remarks", classes="section")
                 with Vertical(classes="field", id="remarks-field"):
                     yield Label("Remarks and endorsements")
                     yield self._make_input("remarks", "text")
-            with Horizontal(classes="row"):
-                yield Label("", classes="section")
-                yield Checkbox(
-                    "Brought forward: totals carried over from a previous logbook",
-                    value=self._carried_forward,
-                    id="carried-forward",
-                    compact=True,
-                )
-            yield Static(HELP, id="message", classes="-info")
-            with Horizontal(id="buttons"):
-                yield Button("Save", variant="primary", id="save", compact=True)
-                yield Button("Cancel", id="cancel", compact=True)
+            yield from self._bottom()
+
+    def _bottom(self) -> ComposeResult:
+        """The brought-forward box, message line and buttons that end every layout."""
+        with Horizontal(classes="row"):
+            yield Label("", classes="section")
+            yield Checkbox(
+                "Brought forward: totals carried over from a previous logbook",
+                value=self._carried_forward,
+                id="carried-forward",
+                compact=True,
+            )
+        yield Static(self.HELP, id="message", classes="-info")
+        with Horizontal(id="buttons"):
+            yield Button("Save", variant="primary", id="save", compact=True)
+            yield Button("Cancel", id="cancel", compact=True)
 
     def on_mount(self) -> None:
         # Fill the boxes here, quietly: only the user's own typing should trigger the
@@ -439,7 +460,7 @@ class FlightForm(ModalScreen[Optional[Flight]]):
     def _show(self, message: str, *, field_name: str | None = None) -> None:
         """Show an error under the form (or the help line when ``message`` is blank)."""
         widget = self.query_one("#message", Static)
-        widget.update(message or HELP)
+        widget.update(message or self.HELP)
         widget.set_class(not message, "-info")
         self._message_field = field_name if message else None
 
@@ -462,15 +483,22 @@ class FlightForm(ModalScreen[Optional[Flight]]):
                 self._show("")
 
         if name in CLOCK_FIELDS:
-            self._total_from_times()
-        elif name == "total":
-            self._apply_total()
-        elif name in SUB_DURATION_FIELDS:
-            self._track_follow(name, value)
+            self._times_changed()
+        elif self._kinds.get(name) == "duration":
+            self._duration_changed(name, value)
         elif name == "registration":
             self._fill_type(value)
         elif name == "aircraft_type":
             self._type_touched = True
+
+    def _times_changed(self) -> None:
+        self._total_from_times()
+
+    def _duration_changed(self, name: str, value: str) -> None:
+        if name == "total":
+            self._apply_total()
+        elif name in SUB_DURATION_FIELDS:
+            self._track_follow(name, value)
 
     def _total_from_times(self) -> None:
         try:
@@ -520,20 +548,21 @@ class FlightForm(ModalScreen[Optional[Flight]]):
         if name not in self._inputs:
             return
         value = widget.value
+        kind = self._kinds[name]
         try:
-            if name == "date":
+            if kind == "date":
                 normal = parse_date(value, self._today).isoformat() if value.strip() else ""
-            elif name in CLOCK_FIELDS:
+            elif kind == "clock":
                 normal = parse_clock(value)
-            elif name in DURATION_FIELDS:
+            elif kind == "duration":
                 normal = format_duration(parse_duration(value), self._fmt, blank_zero=True)
-            elif name in COUNT_FIELDS:
+            elif kind == "count":
                 count = parse_count(value)
                 normal = str(count) if count else ""
             else:
                 normal = value.strip()
         except ValueError as error:
-            self._show(f"{LABELS[name]}: {error}", field_name=name)
+            self._show(f"{self._label(name)}: {error}", field_name=name)
             return
         if self._message_field == name:
             self._show("")
@@ -553,10 +582,18 @@ class FlightForm(ModalScreen[Optional[Flight]]):
             widget.add_class("-invalid")
             widget.focus()
 
+    def _build_entry(self, values: dict[str, str]) -> Flight:
+        """The flight described by the boxes; raises FieldError for a box that is wrong."""
+        return flight_from_values(values, self._today)
+
+    def _problem(self, field_name: str, message: str) -> tuple[str, str]:
+        """Where to point, and what to say, about a problem ``validate`` found."""
+        return field_name, message
+
     def action_save(self) -> None:
         values = {name: widget.value for name, widget in self._inputs.items()}
         try:
-            entry = flight_from_values(values, self._today)
+            entry = self._build_entry(values)
         except FieldError as error:
             self._fail(error.field, str(error))
             return
@@ -564,7 +601,7 @@ class FlightForm(ModalScreen[Optional[Flight]]):
         entry.carried_forward = self.query_one("#carried-forward", Checkbox).value
         problems = validate(entry, self._today)
         if problems:
-            self._fail(*problems[0])
+            self._fail(*self._problem(*problems[0]))
             return
         try:
             self._on_save(entry)

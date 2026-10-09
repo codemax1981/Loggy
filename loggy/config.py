@@ -8,8 +8,9 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .layouts import LAYOUTS, SACAA
 from .stats import DEFAULT_RULES, RULES
-from .timeutil import HM, TIME_FORMATS
+from .timeutil import DECIMAL, TIME_FORMATS
 
 
 def data_dir() -> Path:
@@ -35,8 +36,9 @@ def documents_dir() -> Path:
 
 @dataclass
 class Settings:
-    time_format: str = HM  # "hm" (1:30) or "decimal" (1.5)
+    time_format: str = DECIMAL  # "decimal" (1.5) or "hm" (1:30)
     rules: list[str] = field(default_factory=lambda: list(DEFAULT_RULES))  # keys of RULES
+    layout: str = SACAA  # key into layouts.LAYOUTS
     theme: str = ""  # Textual theme name; blank for the default
 
     @classmethod
@@ -48,7 +50,9 @@ class Settings:
             return settings
         if not isinstance(data, dict):
             return settings
-        if data.get("time_format") in TIME_FORMATS:
+        # Settings from before 1.2, which had no layout, kept H:MM only because it was the
+        # default then; 1.2 follows the SACAA logbook, in decimal hours.
+        if data.get("time_format") in TIME_FORMATS and "layout" in data:
             settings.time_format = data["time_format"]
         rules = data.get("rules")
         if isinstance(rules, str):  # versions before 1.1 kept a single rule set
@@ -57,6 +61,8 @@ class Settings:
             chosen = [key for key in RULES if key in rules]
             if chosen:
                 settings.rules = chosen
+        if data.get("layout") in LAYOUTS:
+            settings.layout = data["layout"]
         if isinstance(data.get("theme"), str):
             settings.theme = data["theme"]
         return settings

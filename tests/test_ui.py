@@ -11,9 +11,16 @@ from textual.widgets import Input, Static
 from loggy.app import LoggyApp
 from loggy.config import Settings
 from loggy.db import Logbook
-from loggy.dialogs import ConfirmDialog, ImportPreview, PathDialog, SettingsDialog
+from loggy.dialogs import (
+    ConfirmDialog,
+    EndorsementDialog,
+    ImportPreview,
+    PathDialog,
+    SettingsDialog,
+)
 from loggy.form import FlightForm
-from loggy.models import Flight
+from loggy.models import Endorsement, Flight
+from loggy.sa_form import SAFlightForm
 from loggy.table import LogTable
 
 TODAY = dt.date(2026, 10, 8)
@@ -38,6 +45,8 @@ def run(app, test, size=(120, 34)):
 
 
 def make_app(logbook, tmp_path, **settings):
+    """The app with the standard layout in H:MM, unless ``settings`` say otherwise."""
+    settings = {"layout": "standard", "time_format": "hm", **settings}
     return LoggyApp(logbook, Settings(**settings), tmp_path / "settings.json",
                     today=lambda: TODAY, backup_dir=tmp_path / "backups")
 
@@ -383,3 +392,286 @@ def test_theme_choice_is_remembered(logbook, tmp_path):
 
     run(LoggyApp(logbook, Settings.load(tmp_path / "settings.json"), tmp_path / "settings.json",
                  today=lambda: TODAY), check)
+
+
+# -- the SACAA layout ----------------------------------------------------------------------
+
+
+def sacaa_app(logbook, tmp_path, **settings):
+    return make_app(logbook, tmp_path, layout="sacaa", time_format="decimal", **settings)
+
+
+def test_sacaa_table_shows_the_columns_in_use(logbook, tmp_path):
+    logbook.add_many([
+        Flight(date=dt.date(2026, 5, 1), aircraft_type="PA28", registration="ZS-SPK",
+               pic_name="M. NAIDOO", remarks="Ex 12 & 13E", total=54, se=54, dual=54,
+               ldg_day=5),
+        Flight(date=dt.date(2026, 6, 1), aircraft_type="PA28", registration="ZS-KWT",
+               pic_name="SELF", dep="FALA", arr="FAPS", total=96, se=96, pic=96, night=30,
+               ldg_night=1),
+    ])
+
+    async def test(pilot):
+        table = pilot.app.query_one("#flights", LogTable)
+        labels = [(column.group, column.label) for column in table.columns]
+        assert labels == [
+            ("", "Date"), ("", "Type"), ("", "Registration"), ("", "Pilot in command"),
+            ("", "Details of flight and remarks"),
+            ("SE day", "Dual"), ("SE day", "PIC"), ("SE night", "PIC"),
+            ("Landings", "Day"), ("Landings", "Night"),
+        ]
+        assert [table.cell(0, index) for index in range(len(labels))] == [
+            "2026-06-01", "PA28", "ZS-KWT", "SELF", "FALA-FAPS", "", "1.1", "0.5", "", "1"]
+        assert [table.cell(1, index) for index in (5, 6, 7, 8)] == ["0.9", "", "", "5"]
+
+    run(sacaa_app(logbook, tmp_path), test)
+
+
+def test_sacaa_form_adds_a_flight(logbook, tmp_path):
+    async def test(pilot):
+        await pilot.press("a")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SAFlightForm)
+        await type_into(pilot, "aircraft_type", "pa28")
+        await type_into(pilot, "registration", "zs-kwt")
+        await type_into(pilot, "pic_name", "SELF")
+        await type_into(pilot, "remarks", "Ex 18")
+        await type_into(pilot, "se_day_pic", "=")  # follows the block time, not known yet
+        await type_into(pilot, "xc", "=")  # follows the flight time
+        await type_into(pilot, "out_time", "0815")
+        await type_into(pilot, "in_time", "0951")
+        assert form_value(pilot, "se_day_pic") == "1.6"
+        assert form_value(pilot, "xc") == "1.6"
+        assert "Flight time 1.6" in plain(pilot.app.screen.query_one("#flight-time", Static))
+        await type_into(pilot, "ldg_day", "1")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert not isinstance(pilot.app.screen, SAFlightForm)
+
+    run(sacaa_app(logbook, tmp_path), test)
+    [saved] = logbook.flights()
+    assert (saved.aircraft_type, saved.registration, saved.pic_name) == ("PA28", "ZS-KWT", "SELF")
+    assert (saved.total, saved.se, saved.pic, saved.xc, saved.night) == (96, 96, 96, 96, 0)
+    assert (saved.dual, saved.me, saved.ldg_day, saved.remarks) == (0, 0, 1, "Ex 18")
+
+
+def test_sacaa_form_night_and_mixed_engine_classes(logbook, tmp_path):
+    async def test(pilot):
+        await pilot.press("a")
+        await pilot.pause()
+        await type_into(pilot, "aircraft_type", "PA34")
+        await type_into(pilot, "me_day_dual", "1.0")
+        await type_into(pilot, "me_night_dual", "0.5")
+        await type_into(pilot, "se_day_pic", "0.3")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, SAFlightForm)
+        assert "Single-engine and multi-engine" in plain(screen.query_one("#message", Static))
+        await type_into(pilot, "se_day_pic", "")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert not isinstance(pilot.app.screen, SAFlightForm)
+
+    run(sacaa_app(logbook, tmp_path), test)
+    [saved] = logbook.flights()
+    assert (saved.total, saved.me, saved.dual, saved.night, saved.se) == (90, 90, 90, 30, 0)
+
+
+def test_sacaa_form_needs_a_time(logbook, tmp_path):
+    async def test(pilot):
+        await pilot.press("a")
+        await pilot.pause()
+        await type_into(pilot, "aircraft_type", "PA28")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, SAFlightForm)
+        assert "column for your role" in plain(screen.query_one("#message", Static))
+        assert screen.focused.id == "f-se_day_dual"
+
+    run(sacaa_app(logbook, tmp_path), test)
+    assert logbook.flights() == []
+
+
+def test_sacaa_edit_keeps_what_the_layout_does_not_show(logbook, tmp_path):
+    flight_id = logbook.add(Flight(date=dt.date(2026, 9, 1), aircraft_type="AT76",
+                                   total=60, multi_pilot=60, copilot=60, ifr=60, night=60))
+
+    async def test(pilot):
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SAFlightForm)
+        assert form_value(pilot, "me_night_copilot") == "1.0"
+        await type_into(pilot, "remarks", "PF")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    run(sacaa_app(logbook, tmp_path), test)
+    saved = logbook.get(flight_id)
+    assert (saved.total, saved.multi_pilot, saved.copilot, saved.ifr, saved.night) == (
+        60, 60, 60, 60, 60)
+    assert saved.remarks == "PF"
+
+
+def test_sacaa_edits_mixed_totals_field_by_field(logbook, tmp_path):
+    logbook.add(Flight(date=dt.date(2020, 1, 1), total=600, se=500, me=100, dual=300, pic=300,
+                       carried_forward=True))
+
+    async def test(pilot):
+        table = pilot.app.query_one("#flights", LogTable)
+        assert "[Total 10.0 · SE 8.3 · ME 1.7 · Dual 5.0 · PIC 5.0]" in table.cell(0, 4)
+        await pilot.press("e")
+        await pilot.pause()
+        screen = pilot.app.screen
+        assert isinstance(screen, FlightForm) and not isinstance(screen, SAFlightForm)
+        assert form_value(pilot, "me") == "1.7"
+
+    run(sacaa_app(logbook, tmp_path), test)
+
+
+def test_endorsements(logbook, tmp_path):
+    logbook.add_endorsement(Endorsement(dt.date(2026, 2, 20), instructor="J. VAN WYK",
+                                        licence="0000000001", designation="Gr II",
+                                        ato="SAMPLE ATO", ato_number="CAA/0000",
+                                        text="SEA land endorsed on P28A"))
+
+    async def test(pilot):
+        await pilot.press("4")
+        await pilot.pause()
+        table = pilot.app.query_one("#endorsement-table", LogTable)
+        assert pilot.app.focused is table
+        assert table.cell(0, 4) == "SAMPLE ATO CAA/0000"
+        await pilot.press("c")  # a new one from the same instructor
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, EndorsementDialog)
+        screen = pilot.app.screen
+        assert screen.query_one("#e-licence", Input).value == "0000000001"
+        assert screen.query_one("#e-date", Input).value == "2026-10-08"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert "Write what the endorsement says" in plain(screen.query_one("#problem", Static))
+        screen.query_one("#e-date", Input).value = "2026-02-21"
+        screen.query_one("#e-text").focus()
+        await pilot.press(*"Solo circuits", "enter")  # Enter moves on rather than wrapping
+        await pilot.pause()
+        assert screen.focused.id == "e-instructor"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert not isinstance(pilot.app.screen, EndorsementDialog)
+        assert table.row_count == 2 and table.cell(0, 5) == "Solo circuits"
+
+        await pilot.press("e")
+        await pilot.pause()
+        pilot.app.screen.query_one("#e-instructor", Input).value = "J. VAN WYK (FI)"
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert table.cell(0, 1) == "J. VAN WYK (FI)"
+
+        await pilot.press("d")
+        await pilot.pause()
+        await pilot.click("#confirm")
+        await pilot.pause()
+        assert table.row_count == 1
+
+        await pilot.press("a")  # on this tab, adds an endorsement rather than a flight
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, EndorsementDialog)
+
+    run(make_app(logbook, tmp_path), test)
+    [kept] = logbook.endorsements()
+    assert kept.text == "SEA land endorsed on P28A"
+
+
+def test_new_sacaa_flight_follows_the_last_role_by_day(logbook, tmp_path):
+    logbook.add(Flight(date=dt.date(2026, 10, 1), aircraft_type="AT76", registration="VT-IYA",
+                       pic_name="CAPT R. SHARMA", total=70, multi_pilot=70, copilot=70,
+                       night=20, xc=70))
+
+    async def test(pilot):
+        await pilot.press("a")
+        await pilot.pause()
+        await type_into(pilot, "out_time", "0210")
+        await type_into(pilot, "in_time", "0325")
+        assert form_value(pilot, "me_day_copilot") == "1.3"  # night is never assumed
+        assert form_value(pilot, "me_night_copilot") == ""
+        assert form_value(pilot, "xc") == "1.3"
+
+    run(sacaa_app(logbook, tmp_path), test)
+
+
+def test_wide_table_keeps_the_date_in_view(logbook, tmp_path):
+    logbook.add_many([
+        Flight(date=dt.date(2026, 5, 1), aircraft_type="PA34", registration="ZS-SNA",
+               total=60, me=60, dual=60, night=60, actual_inst=30, ldg_night=1),
+        Flight(date=dt.date(2026, 6, 1), aircraft_type="AT76", registration="VT-IYA",
+               total=70, multi_pilot=70, copilot=40, picus=30),
+        Flight(date=dt.date(2026, 7, 1), aircraft_type="AT76", registration="FFS",
+               sim=240, sim_inst=120, instructor=240),
+    ])
+
+    async def test(pilot):
+        table = pilot.app.query_one("#flights", LogTable)
+        assert table.virtual_size.width > table.size.width  # wider than the screen
+        first = table.render_line(2).text
+        assert first.startswith(" 2026-07-01 ")
+        await pilot.press("right")
+        await pilot.pause()
+        assert table.scroll_x > 0
+        scrolled = table.render_line(2).text
+        assert scrolled.startswith(" 2026-07-01  AT76  FFS ")  # still in view
+        assert scrolled != first
+        for _ in range(20):
+            await pilot.press("left")
+        await pilot.pause()
+        assert table.scroll_x == 0 and table.render_line(2).text == first
+
+    run(sacaa_app(logbook, tmp_path), test, size=(80, 24))
+
+
+def test_endorsement_wording_is_shown_in_full(logbook, tmp_path):
+    long = "Authorised to fly solo navigation within a radius of 150 nm from base as per " \
+           "SA CARs and CATs P61"
+    logbook.add_endorsement(Endorsement(dt.date(2026, 5, 30), instructor="M. NAIDOO",
+                                        text=long))
+    logbook.add_endorsement(Endorsement(dt.date(2026, 6, 18), instructor="P. DLAMINI",
+                                        text="Passed initial PPL(A) skills test"))
+
+    async def test(pilot):
+        await pilot.press("4")
+        await pilot.pause()
+        detail = pilot.app.query_one("#endorsement-text", Static)
+        assert "Passed initial PPL(A) skills test" in plain(detail)
+        await pilot.press("down")
+        await pilot.pause()
+        assert " ".join(plain(detail).split()) == long
+
+    run(make_app(logbook, tmp_path), test)
+
+
+def test_sacaa_captain_time_stays_multi_pilot(logbook, tmp_path):
+    logbook.add(Flight(date=dt.date(2026, 9, 1), aircraft_type="AT76", total=60,
+                       multi_pilot=60, copilot=60))
+    captain = logbook.add(Flight(date=dt.date(2026, 9, 2), aircraft_type="AT76", total=60,
+                                 multi_pilot=60, pic=60))
+
+    async def test(pilot):
+        await pilot.press("a")  # a new flight in a type flown with a crew
+        await pilot.pause()
+        await type_into(pilot, "me_day_pic", "1.0")
+        await type_into(pilot, "me_day_copilot", "")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        await pilot.press("down")  # the captain's flight
+        await pilot.press("e")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, SAFlightForm)
+        await type_into(pilot, "remarks", "Upgrade")
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+
+    run(sacaa_app(logbook, tmp_path), test)
+    new = logbook.flights()[-1]
+    assert (new.pic, new.multi_pilot, new.me) == (60, 60, 0)
+    edited = logbook.get(captain)
+    assert (edited.pic, edited.multi_pilot, edited.me, edited.remarks) == (60, 60, 0, "Upgrade")

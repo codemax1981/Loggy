@@ -96,8 +96,8 @@ def format_duration(minutes: int, fmt: str = HM, *, blank_zero: bool = False) ->
     if not minutes and blank_zero:
         return ""
     if fmt == DECIMAL:
-        hours = (Decimal(minutes) / 60).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-        return f"{hours:.1f}"
+        tenths = (abs(minutes) + 3) // 6  # to the nearest tenth of an hour, halves up
+        return f"{'-' if minutes < 0 else ''}{tenths // 10}.{tenths % 10}"
     hours, mins = divmod(minutes, 60)
     return f"{hours}:{mins:02d}"
 

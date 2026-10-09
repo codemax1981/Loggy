@@ -55,6 +55,8 @@ EXPORT_COLUMNS = (
     ("ldg_day", "Day Landings"),
     ("ldg_night", "Night Landings"),
     ("approaches", "Approaches"),
+    ("navaids", "Navaids"),
+    ("place", "Place"),
     ("remarks", "Remarks"),
     ("carried_forward", "Brought Forward"),
 )
@@ -94,7 +96,10 @@ _ALIASES = {
     "ldg_day": ("landingsday", "ldgday", "dayldg", "daylanding", "dayldgs", "landings", "ldg"),
     "ldg_night": ("landingsnight", "ldgnight", "nightldg", "nightlanding", "nightldgs"),
     "approaches": ("approach", "app", "apps", "instrumentapproaches", "numberofapproaches"),
-    "remarks": ("remark", "notes", "note", "comments", "comment", "remarksandendorsements"),
+    "navaids": ("navaid", "approachaids", "approachtype"),
+    "place": ("approachplace",),
+    "remarks": ("remark", "notes", "note", "comments", "comment", "remarksandendorsements",
+                "detailsofflight", "detailsofflightandremarks", "details"),
     "carried_forward": ("carriedforward", "bf"),
 }
 

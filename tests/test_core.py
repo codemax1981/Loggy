@@ -3,8 +3,8 @@ import datetime as dt
 import pytest
 
 from loggy.config import Settings
-from loggy.db import Logbook, LogbookError, daily_backup
-from loggy.models import Flight, validate
+from loggy.db import SCHEMA_VERSION, Logbook, LogbookError, daily_backup
+from loggy.models import Endorsement, Flight, validate
 from loggy.stats import (
     ANY_AIRCRAFT,
     Totals,
@@ -290,13 +290,21 @@ def test_sacaa_approaches_count_over_90_days():
 
 def test_settings_load_and_upgrade(tmp_path):
     path = tmp_path / "settings.json"
-    assert Settings.load(path).rules == ["sacaa", "dgca"]  # the default
-    path.write_text('{"rules": "faa", "time_format": "decimal", "theme": "nord"}')
-    settings = Settings.load(path)  # an older single rule set
+    defaults = Settings.load(path)
+    assert (defaults.rules, defaults.time_format, defaults.layout) == (
+        ["sacaa", "dgca"], "decimal", "sacaa")
+    path.write_text('{"rules": "faa", "time_format": "hm", "theme": "nord"}')
+    settings = Settings.load(path)  # from 1.0: a single rule set, and H:MM was the default
     assert (settings.rules, settings.time_format, settings.theme) == (["faa"], "decimal", "nord")
-    path.write_text('{"rules": ["dgca", "bogus", "sacaa"], "time_format": "weird"}')
+    assert settings.layout == "sacaa"
+    path.write_text('{"time_format": "hm", "layout": "standard"}')
     settings = Settings.load(path)
-    assert (settings.rules, settings.time_format) == (["sacaa", "dgca"], "hm")
+    assert (settings.time_format, settings.layout) == ("hm", "standard")
+    path.write_text('{"rules": ["dgca", "bogus", "sacaa"], "time_format": "weird", '
+                    '"layout": "weird"}')
+    settings = Settings.load(path)
+    assert (settings.rules, settings.time_format, settings.layout) == (
+        ["sacaa", "dgca"], "decimal", "sacaa")
     path.write_text('{"rules": []}')
     assert Settings.load(path).rules == ["sacaa", "dgca"]
     settings.rules = ["easa"]
@@ -365,8 +373,10 @@ def test_version_1_logbook_is_upgraded_in_place(tmp_path):
     book.update(entry)
     assert book.get(entry.id).picus == 30
     book.close()
-    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == 2
-    Logbook(path).close()  # opening again is harmless
+    assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    book = Logbook(path)  # opening again is harmless
+    assert book.get(entry.id).picus == 30 and book.endorsements() == []
+    book.close()
 
 
 def test_picus_is_a_role():
@@ -400,3 +410,27 @@ def test_day_and_night_by_role():
 def test_last_six_months():
     entries = [flight(dt.date(2026, 4, 9), total=60), flight(dt.date(2026, 4, 8), total=30)]
     assert dict(period_totals(entries, TODAY))["Last 6 months"]["total"] == 60
+
+
+def test_endorsements(tmp_path):
+    book = Logbook(tmp_path / "logbook.db")
+    first = Endorsement(dt.date(2026, 2, 20), "J. VAN WYK", "0000000001", "Gr II", "SAMPLE ATO",
+                        "CAA/0000", "Authorised to fly solo in circuits")
+    earlier = Endorsement(dt.date(2025, 11, 8), "M. NAIDOO", text="Spin avoidance completed")
+    book.add_endorsement(first)
+    book.add_endorsement(earlier)
+    assert [e.text for e in book.endorsements()] == [earlier.text, first.text]  # by date
+    first.text = "Solo circuits"
+    book.update_endorsement(first)
+    assert book.endorsements()[1] == first
+    book.delete_endorsement(earlier.id)
+    assert book.endorsements() == [first]
+    # A logbook with only endorsements is still backed up.
+    assert daily_backup(book, tmp_path / "backups", TODAY) is not None
+
+
+def test_navaids_and_place_round_trip(tmp_path):
+    book = Logbook(tmp_path / "logbook.db")
+    entry = flight(TODAY, approaches=2, navaids="ILS VOR", place="FALA")
+    book.add(entry)
+    assert book.get(entry.id) == entry

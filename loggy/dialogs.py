@@ -12,13 +12,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TextArea
 
 from .config import Settings
 from .csvio import ImportResult
-from .models import Flight
+from .layouts import LAYOUTS
+from .models import Endorsement, Flight
 from .stats import RULES
-from .timeutil import DECIMAL, HM
+from .timeutil import DECIMAL, HM, parse_date
 
 DIALOG_CSS = """
 .dialog {
@@ -252,9 +253,16 @@ class SettingsDialog(ModalScreen[Optional[Settings]]):
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog") as box:
             box.border_title = "Settings"
+            yield Label("Logbook layout")
+            yield Select(
+                [(name, key) for key, name in LAYOUTS.items()],
+                value=self._settings.layout,
+                allow_blank=False,
+                id="layout",
+            )
             yield Label("Show times as")
             yield Select(
-                [("Hours and minutes (1:30)", HM), ("Decimal hours (1.5)", DECIMAL)],
+                [("Decimal hours (1.5)", DECIMAL), ("Hours and minutes (1:30)", HM)],
                 value=self._settings.time_format,
                 allow_blank=False,
                 id="time-format",
@@ -287,30 +295,145 @@ class SettingsDialog(ModalScreen[Optional[Settings]]):
             Settings(
                 time_format=str(self.query_one("#time-format", Select).value),
                 rules=rules,
+                layout=str(self.query_one("#layout", Select).value),
                 theme=self._settings.theme,
             )
         )
 
 
+class ParagraphInput(TextArea):
+    """A box for a paragraph that wraps as it is typed; Enter moves on, as in an Input."""
+
+    BINDINGS = [Binding("enter", "app.focus_next", "Next", show=False, priority=True)]
+
+
+class EndorsementDialog(ModalScreen[Optional[Endorsement]]):
+    """Add or edit an instructor's endorsement."""
+
+    DEFAULT_CSS = """
+    EndorsementDialog { align: center middle; }
+    EndorsementDialog .dialog { width: 84; }
+    EndorsementDialog .pair { height: auto; }
+    EndorsementDialog .pair Vertical { height: auto; width: 1fr; margin-right: 2; }
+    EndorsementDialog Label { color: $text-muted; margin-top: 1; }
+    EndorsementDialog Input, EndorsementDialog ParagraphInput { background: $surface; }
+    EndorsementDialog Input:focus, EndorsementDialog ParagraphInput:focus {
+        background: $primary 35%;
+    }
+    EndorsementDialog ParagraphInput { height: 3; padding: 0; }
+    """
+    BINDINGS = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+        Binding("ctrl+s", "save", "Save", priority=True),
+    ]
+    FIELDS = (
+        ("date", "Date"),
+        ("text", "Endorsement"),
+        ("instructor", "Instructor"),
+        ("licence", "Licence number"),
+        ("designation", "Designation"),
+        ("ato", "ATO name"),
+        ("ato_number", "ATO number"),
+    )
+
+    def __init__(self, title: str, endorsement: Endorsement, today, on_save) -> None:
+        super().__init__()
+        self._title = title
+        self._endorsement = endorsement
+        self._today = today
+        self._on_save = on_save
+
+    def _input(self, name: str) -> Input | TextArea:
+        value = getattr(self._endorsement, name)
+        if name == "text":
+            return ParagraphInput(value, id="e-text", compact=True, highlight_cursor_line=False)
+        text = value.isoformat() if name == "date" else value
+        return Input(text, id=f"e-{name}", compact=True)
+
+    def compose(self) -> ComposeResult:
+        labels = dict(self.FIELDS)
+        with Vertical(classes="dialog") as box:
+            box.border_title = self._title
+            box.border_subtitle = "Ctrl+S save · Esc cancel"
+            yield Label(labels["date"])
+            yield self._input("date")
+            yield Label(labels["text"])
+            yield self._input("text")
+            for left, right in (("instructor", "licence"), ("designation", "ato"),
+                                ("ato_number", "")):
+                with Horizontal(classes="pair"):
+                    for name in (left, right):
+                        with Vertical():
+                            if name:
+                                yield Label(labels[name])
+                                yield self._input(name)
+            yield Static("", id="problem", classes="error")
+            with Horizontal(classes="buttons"):
+                yield Button("Save", variant="primary", id="save", compact=True)
+                yield Button("Cancel", id="cancel", compact=True)
+
+    def on_mount(self) -> None:
+        self.query_one("#e-date", Input).focus()
+
+    @on(Input.Submitted)
+    def _submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self.focus_next()
+
+    def action_save(self) -> None:
+        values = {name: self.query_one(f"#e-{name}", Input).value.strip()
+                  for name, _ in self.FIELDS if name != "text"}
+        values["text"] = " ".join(self.query_one("#e-text", TextArea).text.split())
+        try:
+            day = parse_date(values.pop("date"), self._today)
+        except ValueError as error:
+            self.query_one("#problem", Static).update(f"Date: {error}")
+            self.query_one("#e-date", Input).focus()
+            return
+        if not values["text"]:
+            self.query_one("#problem", Static).update("Write what the endorsement says")
+            self.query_one("#e-text", TextArea).focus()
+            return
+        endorsement = Endorsement(day, id=self._endorsement.id, **values)
+        try:
+            self._on_save(endorsement)
+        except Exception as error:  # keep what was typed if the write fails
+            self.query_one("#problem", Static).update(f"Could not save: {error}")
+            return
+        self.dismiss(endorsement)
+
+    @on(Button.Pressed)
+    def _pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "save":
+            self.action_save()
+        else:
+            self.dismiss(None)
+
+
 HELP_TEXT = """\
-[b]Logbook[/b]
-  a         add a flight
-  Enter, e  edit the selected flight
-  c         copy the selected flight (same aircraft and route)
-  d         delete the selected flight
+[b]Keys[/b]
+  a         add a flight (an endorsement, on that tab)
+  Enter, e  edit the selected flight or endorsement
+  c         copy it: a new flight in the same aircraft
+  d         delete the selected flight or endorsement
   /         search             Esc  clear the search
-  1, 2, 3   Logbook, Totals and Currency tabs
+  ←, →      scroll a wide logbook sideways
+  1 to 4    Logbook, Totals, Currency and Endorsements tabs
   x, i      export to or import from a CSV file
-  s         settings: time format and which rules to check
+  s         settings: layout, time format and rules to check
   q         quit
 
 [b]Entering a flight[/b]
-  All times are UTC. Type clock times as 0930, 930 or 09:30.
-  The total is worked out from the off-block and on-block times
-  (past midnight is fine), or you can type it yourself.
-  Durations can be typed as 1:30, 1.5 or 130.
-  Type [b]=[/b] in any time box to copy the total into it. A box that
-  equals the total follows it when you change the times.
+  All times are UTC. Type clock times as 0930, 930 or 09:30,
+  and durations as 1.5, 1:30 or 130.
+  In the SACAA layout, put the time in the column for your role:
+  SE or ME, by day or night, as Dual, PIC, PICUS or Co-pilot.
+  Type [b]=[/b] in one of those columns to copy the block time (from
+  the off- and on-block times); in any other time box, = copies
+  the flight time. A box that holds the whole flight follows it
+  when you change the times.
+  In the standard layout, the total comes from the block times,
+  or you can type it; = copies the total.
   A new flight starts from your last one: same aircraft and PIC,
   departing from where you last landed.
   Dates: t = today, y = yesterday, -3 = three days ago.
@@ -320,9 +443,15 @@ HELP_TEXT = """\
   by a crew of two. PICUS: pilot in command under supervision.
 
 [b]Previous logbooks[/b]
-  To carry over totals from a paper logbook, add one entry with
-  your totals and tick 'Brought forward'. It counts towards your
-  totals but not towards currency or the recent-period totals.
+  To carry over totals from a paper logbook, add an entry with
+  your totals and tick 'Brought forward'. In the SACAA layout, add
+  one for each row of the grid you use (SE day, SE night and so
+  on). They count towards your totals but not towards currency
+  or the recent-period totals.
+
+[b]Endorsements[/b]
+  Keep your instructors' endorsements on the Endorsements tab:
+  solo and navigation authorisations, dual checks, skills tests.
 """
 
 

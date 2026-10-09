@@ -32,7 +32,7 @@ SUB_DURATION_FIELDS = tuple(name for name in DURATION_FIELDS if name not in ("to
 COUNT_FIELDS = ("ldg_day", "ldg_night", "approaches")
 CLOCK_FIELDS = ("out_time", "in_time")
 # Text fields that are conventionally written in capitals.
-CODE_FIELDS = ("flight_no", "aircraft_type", "registration", "dep", "arr")
+CODE_FIELDS = ("flight_no", "aircraft_type", "registration", "dep", "arr", "navaids", "place")
 TEXT_FIELDS = CODE_FIELDS + ("pic_name", "remarks")
 
 LABELS = {
@@ -63,6 +63,8 @@ LABELS = {
     "ldg_day": "Day landings",
     "ldg_night": "Night landings",
     "approaches": "Approaches",
+    "navaids": "Navaids",
+    "place": "Place",
     "remarks": "Remarks",
     "carried_forward": "Brought forward",
 }
@@ -97,6 +99,8 @@ class Flight:
     ldg_day: int = 0
     ldg_night: int = 0
     approaches: int = 0
+    navaids: str = ""  # aids used for the instrument approaches, as in "ILS VOR"
+    place: str = ""  # where the instrument approaches were flown
     remarks: str = ""
     # A summary line of totals from a previous logbook rather than a real flight.
     carried_forward: bool = False
@@ -135,6 +139,8 @@ class Flight:
             self.arr,
             self.pic_name,
             self.remarks,
+            self.navaids,
+            self.place,
             self.role,
             "brought forward" if self.carried_forward else "",
         )
@@ -142,6 +148,20 @@ class Flight:
 
     def copy(self, **changes) -> Flight:
         return dataclasses.replace(self, **changes)
+
+
+@dataclass
+class Endorsement:
+    """An instructor's sign-off, from the endorsement pages of the logbook."""
+
+    date: dt.date
+    instructor: str = ""
+    licence: str = ""
+    designation: str = ""
+    ato: str = ""  # approved training organisation
+    ato_number: str = ""
+    text: str = ""
+    id: int | None = None
 
 
 def validate(flight: Flight, today: dt.date) -> list[tuple[str, str]]:

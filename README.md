@@ -5,15 +5,22 @@ PowerShell or the classic command prompt), and on macOS and Linux too.
 
 ![The logbook](docs/logbook.png)
 
-- **Every logbook column**: date, aircraft type and registration, route, off- and
-  on-block times (UTC), single-pilot SE/ME and multi-pilot time, PIC, PICUS (P1 U/S),
-  co-pilot, dual and instructor time, night, IFR, actual and simulated instrument,
-  cross-country, simulator (FSTD), day and night landings, approaches and remarks. That covers
-  SACAA, DGCA, EASA/ICAO and FAA style logbooks.
-- **Quick entry**: the total is worked out from the block times, including flights past
-  midnight. Type `=` in any time box to copy the total. A new flight starts from your last one
-  (same aircraft and PIC, departing where you last landed). Airports, registrations, types and
-  names are suggested as you type, and a known registration fills in its aircraft type.
+- **Laid out like a South African (SACAA) logbook**: date, type, registration, pilot in
+  command, details of flight and remarks; instrument navaids, place, actual and FSTD time;
+  instructor time; FSTD; the sixteen flight-time columns (single- and multi-engine, by day
+  and by night, as dual, PIC, PICUS or co-pilot); and day and night landings. Times are in
+  decimal hours, and columns you have never used stay out of the way. A standard layout is
+  in Settings too.
+- **Every logbook column underneath**: route, off- and on-block times (UTC), flight number,
+  single-pilot SE/ME and multi-pilot time, IFR, simulated instrument, cross-country and
+  approaches as well. That covers SACAA, DGCA, EASA/ICAO and FAA style logbooks.
+- **Quick entry**: put the time in the column for your role, or type `=` there to copy the
+  block time from the off- and on-block times (flights past midnight included). A new
+  flight starts from your last one: same aircraft, PIC and role, departing where you last
+  landed. Airports, registrations, types and names are suggested as you type, and a known
+  registration fills in its aircraft type.
+- **Endorsements**: your instructors' endorsements (solo, navigation, dual checks, skills
+  tests) with their licence numbers, grades and ATOs, on a tab of their own.
 - **Totals**: grand totals; day and night time by role, single- and multi-engine, the way
   South African and Indian logbooks add it up; rolling 7/28/90-day, 6-month, 365-day and
   calendar-year totals; and totals by aircraft type and by year.
@@ -22,7 +29,7 @@ PowerShell or the classic command prompt), and on macOS and Linux too.
   each with its regulation reference and the date it runs out.
 - **Your data stays yours**: a single file on your computer, backed up automatically each day.
   CSV import and export works with Excel and with most other logbook apps.
-- **Previous logbooks**: carry over the totals from a paper logbook as one brought-forward entry.
+- **Previous logbooks**: carry over the totals from a paper logbook as brought-forward entries.
 
 ## Install on Windows
 
@@ -56,14 +63,15 @@ loggy
 
 | Key | Does |
 | --- | --- |
-| `a` | add a flight |
-| `Enter` or `e` | edit the selected flight |
-| `c` | copy the selected flight as a new one (same aircraft and route, today's date) |
-| `d` | delete the selected flight (asks first) |
+| `a` | add a flight (on the Endorsements tab, an endorsement) |
+| `Enter` or `e` | edit the selected flight or endorsement |
+| `c` | copy the selected flight as a new one (same aircraft and route, today's date), or start a new endorsement from the same instructor |
+| `d` | delete the selected flight or endorsement (asks first) |
 | `/` | search; `Esc` clears it |
-| `1` `2` `3` | Logbook, Totals and Currency tabs |
+| `←` `→` | scroll a wide logbook sideways; the date, type and registration stay in view |
+| `1` `2` `3` `4` | Logbook, Totals, Currency and Endorsements tabs |
 | `x` / `i` | export to / import from CSV |
-| `s` | settings: hours and minutes or decimal hours; which authorities' currency rules to check |
+| `s` | settings: the logbook layout; decimal hours or hours and minutes; which authorities' currency rules to check |
 | `?` | help |
 | `q` | quit |
 
@@ -73,38 +81,66 @@ The colour theme can be changed with `Ctrl+P` → *Theme*, and Loggy remembers y
 
 ![Entering a flight](docs/new-flight.png)
 
-- All times are **UTC**. Type clock times as `0930`, `930` or `09:30`.
-- The **total** is worked out from the off-block and on-block times. You can also type it
-  yourself, for example for flights logged without block times.
-- Durations can be typed as `1:30`, `1.5` or `130`.
-- Type **`=`** in any time box to copy the total into it. A box that equals the total
-  *follows* it: if you then correct the on-block time, those boxes update too.
-- A new flight starts from your last one. Boxes that were the whole flight last time (say PIC
-  and single-pilot SE, or co-pilot, multi-pilot and IFR) fill in as soon as the total is
-  known. Night time is never assumed.
+The form follows the logbook's columns:
+
+- All times are **UTC**. Type clock times as `0930`, `930` or `09:30`, and durations as
+  `1.5`, `1:30` or `130`.
+- Put the flight time in the box for your role in the grid: **SE** (single-engine) or **ME**
+  (multi-engine), by **day** or **night**, as **Dual**, **PIC**, **PICUS** (pilot in command
+  under supervision) or **Co-pilot**. A flight that was partly at night uses two boxes, such
+  as SE day dual 1.0 and SE night dual 0.5. Loggy adds them up as the flight time.
+- Type **`=`** in a grid box to copy the block time worked out from the off- and on-block
+  times. In any other time box (instrument, instructor, cross-country and so on), `=` copies
+  the flight time. A box that holds the whole flight *follows* it: correct the on-block time
+  and those boxes update too.
+- A new flight starts from your last one: same aircraft, PIC and role, departing from where
+  you last landed. Once you type the block times, the box for your role fills in. Night and
+  instrument time are never assumed.
+- **FSTD session** is simulator time, which is never flight time; leave the grid empty for a
+  simulator session.
 - Dates: `t` = today, `y` = yesterday, `-3` = three days ago, or `YYYY-MM-DD`.
 - The **→** key accepts a suggested airport, registration, type or name.
 - `Enter` moves to the next box, `Ctrl+S` saves and `Esc` cancels (you are asked before
   anything you typed is thrown away).
 
-**Single-engine and multi-engine time.** Put single-engine time in **SP SE** and multi-engine
-time in **SP ME**, or in **Multi-pilot** when the aircraft is flown by a crew of two (airline
-flying). Loggy's day and night summary counts SP ME and Multi-pilot together as multi-engine
-time. **PICUS** is pilot in command under supervision (P1 U/S).
+Loggy checks each entry before saving it. For example, single- and multi-engine time, or
+two roles split between day and night, need separate entries, and both block times must be
+given or neither.
 
-Loggy checks each entry before saving it. For example, PIC or night time can't be more than
-the total, and both block times must be given or neither.
+**Multi-engine and multi-pilot time.** Behind the grid, Loggy also keeps multi-engine time
+apart as single-pilot (SP ME) or multi-pilot (flown by a crew of two), as EASA and DGCA
+logbooks do. PICUS and co-pilot time is multi-pilot time. Dual and PIC time is too in a type
+you have flown as PICUS or co-pilot (a captain's time in an airliner, say), and otherwise
+single-pilot ME time. Editing an entry keeps what it had.
 
-In the logbook the **Role** column shows PIC, PICUS, SIC (co-pilot), DUAL or INSTR. **SIM** marks a
-simulator session (its session time is shown as the total) and **B/F** marks
-brought-forward totals.
+**The standard layout.** Settings (`s`) can switch Loggy to its standard layout instead:
+the logbook shows the route, block times, total, role, night, IFR and landings, and the form
+has separate boxes for the total, SP SE, SP ME, Multi-pilot, each role, night, IFR and so
+on, with `=` copying the total. In that layout the **Role** column shows PIC, PICUS, SIC
+(co-pilot), DUAL or INSTR, **SIM** marks a simulator session and **B/F** brought-forward
+totals. Both layouts work on the same logbook, so you can switch at any time.
+
+### Endorsements
+
+![Endorsements](docs/endorsements.png)
+
+The Endorsements tab (`4`) keeps the endorsements from the back of your logbook: what was
+endorsed, the date, and the instructor's name, licence number, designation (grade) and ATO.
+Press `a` there to add one, `c` to start a new one from the same instructor, and `Enter`
+to read or edit one in full.
 
 ### Carrying on from a paper logbook
 
-Add one entry dated the day of your last paper entry, put your totals in it (total, PIC,
-night, landings and so on), and tick **Brought forward**. It counts towards your grand totals
-and totals by type, but not towards currency, the recent-period totals or the day and night
-summary by role (a paper total has no day and night split by role).
+Add an entry dated the day of your last paper entry, put your totals in it, and tick
+**Brought forward**. In the SACAA layout, add one for each row of the grid you have time in
+(SE day, SE night, ME day, ME night), since one entry holds day or night time, not both,
+when it has more than one role. Brought-forward entries count towards your grand totals and
+totals by type, but not towards currency, the recent-period totals or the day and night
+summary by role.
+
+An entry that the grid can't show exactly, such as brought-forward totals from Loggy's
+standard layout that mix single- and multi-engine time, shows its times in the details
+column instead, and opens in the standard form when you edit it, so that nothing is lost.
 
 ### Currency
 
@@ -147,6 +183,10 @@ exact paths.
   next to it, keeping the last 30. To restore one, close Loggy and copy it over `logbook.db`.
 - **Another logbook file**: `loggy --db D:\logbook.db` (or `loggy.bat --db ...`), or set the
   `LOGGY_DB` environment variable. This is handy for keeping the logbook in a synced folder.
+- **Using a logbook file you were given** (from another computer, say): close Loggy, rename
+  your own `logbook.db` if you want to keep it, and copy the new file in its place as
+  `logbook.db`. Or open it where it is with `--db`. A logbook written by a newer Loggy needs
+  that version or later.
 - **Export**: `x` writes everything to a CSV file that opens in Excel. It's worth keeping a
   copy somewhere safe now and then.
 
@@ -185,9 +225,10 @@ py -m pytest
 
 The code is in `loggy/`:
 
-- `models.py`: the flight record and its validation
-- `db.py`: SQLite storage and backups
+- `models.py`: the flight and endorsement records, and validation
+- `db.py`: SQLite storage, schema upgrades and backups
 - `stats.py`: totals and currency
+- `layouts.py`: the SACAA logbook's columns, and its flight-time grid
 - `csvio.py`: CSV import and export
-- `app.py`, `form.py`, `dialogs.py`, `table.py` and `reports.py`: the
+- `app.py`, `form.py`, `sa_form.py`, `dialogs.py`, `table.py` and `reports.py`: the
   [Textual](https://textual.textualize.io/) interface
